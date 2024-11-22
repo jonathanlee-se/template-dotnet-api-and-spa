@@ -1,0 +1,29 @@
+# Needs to match the name used by your managed identity to authenticate the service in the cluster
+fullnameOverride: changeme-ui
+
+image:
+  # TODO: Change repository name to match your project. Should match your .devops/app.yaml
+  repository: acrsbsharedservices.azurecr.io/changeme-ui
+  tag: null
+  pullPolicy: Always
+
+ingress:
+  enabled: true
+  hosts:
+    # TODO: Set host for UI
+    - host: changeme.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+          stripPrefixPath: true
+
+resources:
+  limits:
+    cpu: 125m
+    memory: 256Mi
+  requests:
+    cpu: 60m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
