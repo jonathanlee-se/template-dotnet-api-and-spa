@@ -1,0 +1,62 @@
+replicaCount: 1
+
+image:
+  repository: acrsbsharedservices.azurecr.io/changeme-api
+  tag: ""
+  pullPolicy: Always
+
+fullnameOverride: changeme-api
+
+service:
+  port: 8080
+
+# TODO: Use this to define a public ingress route
+privateIngress:
+  enabled: false
+  # hosts:
+  #   - host: changeme.sbu.ses.int
+  #     paths:
+  #       - path: /api
+  #         pathType: ImplementationSpecific
+
+# TODO: Use this to define a public ingress route
+publicIngress:
+  enabled: false
+#  hosts:
+#    - host: changeme.schneider-electric.com
+#      paths:
+#        - path: /api
+#          pathType: ImplementationSpecific
+
+serviceAccount:
+  name: change-name
+  annotations:
+    azure.workload.identity/client-id: change managed identity
+
+# TODO: Adjust as necessary
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 300
+  targetMemoryUtilizationPercentage: 150
+  vpa:
+    enabled: true
+    mode: "Off"
+
+application:
+  environment: nonprod
+  # TODO: Set your open telemetry service name. Should match your .devops/app.yaml
+  otelServiceName:
+  # TODO: Set your identity client id
+  identityClientId:
+  livenessEndpoint: /healthz
+  readinessEndpoint: /healthz
