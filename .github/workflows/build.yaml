@@ -125,10 +125,10 @@ jobs:
         run: npm run build -- -c=production
         working-directory: app
 
-      - name: Docker Build UI
-        run: |
-          docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/$(appName)-ui:${{ env.tag }} -f .cicd/app/Dockerfile .
-          echo "UI Docker Image Built with Tag: ${{ env.tag }}"
+      #- name: Docker Build UI
+      #  run: |
+      #    docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/$(appName)-ui:${{ env.tag }} -f .cicd/app/Dockerfile .
+      #    echo "UI Docker Image Built with Tag: ${{ env.tag }}"
 
       #- name: Docker Push UI
       #  run: |
