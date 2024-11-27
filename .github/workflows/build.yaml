@@ -30,7 +30,8 @@ env:
 jobs:
   api-build:
     name: API Build
-    runs-on: ubuntu-latest
+    runs-on:
+      group: sb-runners
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,20 +40,11 @@ jobs:
         run: |
           curl -s -L https://dot.net/v1/dotnet-install.sh > dotnet-install.sh 
           chmod +x dotnet-install.sh
-          ./dotnet-install.sh --install-dir /var/dotnet --channel 8.0 
+          sudo ./dotnet-install.sh --install-dir /var/dotnet --channel 8.0 
           sudo ln -s /var/dotnet/dotnet /usr/local/bin/dotnet
-        shell: bash
-
-      - name: Verify .NET Installation
-        run: |
           echo "dotnet location: $(which dotnet)"
           echo "dotnet version: $(dotnet --version)"
-        shell: bash
-
-      - name: Add GitHub NuGet Source
-        run: |
           dotnet nuget add source --username ${{ github.actor }} --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name "github" "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
-        shell: bash
 
       - name: Restore .NET packages
         run: dotnet restore service/SE.Sustainability.Template.sln
@@ -61,13 +53,13 @@ jobs:
         run: dotnet build service/SE.Sustainability.Template.sln -o .build
 
       - name: Run Unit Tests
-        run: dotnet test service/SE.Sustainability.Template.API/SE.Sustainability.Template.API.csproj --logger trx --results-directory "TestResults" --filter "FullyQualifiedName!~Integration&FullyQualifiedName!~Shared&Category!=integration" --collect:"XPlat Code Coverage"
+        run: dotnet test service/SE.Sustainability.Template.API/SE.Sustainability.Template.API.csproj --logger trx --results-directory "TestResults-${{ matrix.dotnet-version }}" --filter "FullyQualifiedName!~Integration&FullyQualifiedName!~Shared&Category!=integration" --collect:"XPlat Code Coverage"
 
       - name: Upload dotnet test results
         uses: actions/upload-artifact@v4
         with:
-          name: dotnet-results
-          path: TestResults
+          name: dotnet-results-${{ matrix.dotnet-version }}
+          path: TestResults-${{ matrix.dotnet-version }}
         if: ${{ always() }}
 
       - name: Publish Coverage Report
@@ -78,17 +70,16 @@ jobs:
           path: coverage-results
 
       - name: Setup Docker
-        uses: docker/setup-buildx-action@v2
+        uses: SE-Sustainability-Business/sbaction-dockersetup@v1
 
       - name: Docker Build API
         run: |
-          docker build -t acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ github.sha }} -f .cicd/service/Dockerfile .
-        shell: bash
+          docker build -t acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ env.image_tag }} -f .cicd/service/Dockerfile .
+          echo "API Docker Image Built with Tag: ${{ env.image_tag }}"
 
       - name: Docker Push API
         run: |
-          docker push acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ github.sha }}
-        shell: bash
+          docker push acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ env.image_tag }}
 
   spa-build:
     name: UI Build
