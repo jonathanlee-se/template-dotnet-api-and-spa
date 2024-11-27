@@ -30,8 +30,7 @@ env:
 jobs:
   api-build:
     name: API Build
-    runs-on:
-      group: sb-runners
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -40,11 +39,20 @@ jobs:
         run: |
           curl -s -L https://dot.net/v1/dotnet-install.sh > dotnet-install.sh 
           chmod +x dotnet-install.sh
-          sudo ./dotnet-install.sh --install-dir /var/dotnet --channel 8.0 
+          ./dotnet-install.sh --install-dir /var/dotnet --channel 8.0 
           sudo ln -s /var/dotnet/dotnet /usr/local/bin/dotnet
+        shell: bash
+
+      - name: Verify .NET Installation
+        run: |
           echo "dotnet location: $(which dotnet)"
           echo "dotnet version: $(dotnet --version)"
+        shell: bash
+
+      - name: Add GitHub NuGet Source
+        run: |
           dotnet nuget add source --username ${{ github.actor }} --password ${{ secrets.GITHUB_TOKEN }} --store-password-in-clear-text --name "github" "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+        shell: bash
 
       - name: Restore .NET packages
         run: dotnet restore service/SE.Sustainability.Template.sln
@@ -53,13 +61,13 @@ jobs:
         run: dotnet build service/SE.Sustainability.Template.sln -o .build
 
       - name: Run Unit Tests
-        run: dotnet test service/SE.Sustainability.Template.API/SE.Sustainability.Template.API.csproj --logger trx --results-directory "TestResults-${{ matrix.dotnet-version }}" --filter "FullyQualifiedName!~Integration&FullyQualifiedName!~Shared&Category!=integration" --collect:"XPlat Code Coverage"
+        run: dotnet test service/SE.Sustainability.Template.API/SE.Sustainability.Template.API.csproj --logger trx --results-directory "TestResults" --filter "FullyQualifiedName!~Integration&FullyQualifiedName!~Shared&Category!=integration" --collect:"XPlat Code Coverage"
 
       - name: Upload dotnet test results
         uses: actions/upload-artifact@v4
         with:
-          name: dotnet-results-${{ matrix.dotnet-version }}
-          path: TestResults-${{ matrix.dotnet-version }}
+          name: dotnet-results
+          path: TestResults
         if: ${{ always() }}
 
       - name: Publish Coverage Report
@@ -70,16 +78,17 @@ jobs:
           path: coverage-results
 
       - name: Setup Docker
-        uses: SE-Sustainability-Business/sbaction-dockersetup@v1
+        uses: docker/setup-buildx-action@v2
 
       - name: Docker Build API
         run: |
-          docker build -t acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ env.image_tag }} -f .cicd/service/Dockerfile .
-          echo "API Docker Image Built with Tag: ${{ env.image_tag }}"
+          docker build -t acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ github.sha }} -f .cicd/service/Dockerfile .
+        shell: bash
 
       - name: Docker Push API
         run: |
-          docker push acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ env.image_tag }}
+          docker push acrsbsharedservices.azurecr.io/${{env.appName}}-api:${{ github.sha }}
+        shell: bash
 
   spa-build:
     name: UI Build
@@ -127,13 +136,14 @@ jobs:
 
       - name: Docker Build UI
         run: |
-          docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ env.image_tag }} -f .cicd/app/Dockerfile .
-          echo "UI Docker Image Built with Tag: ${{ env.image_tag }}"
+          docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ github.sha }} -f .cicd/app/Dockerfile .
+        shell: bash
 
       - name: Docker Push UI
         run: |
           echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
-          docker push ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ env.image_tag }}
+          docker push ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ github.sha }}
+        shell: bash
 
   deploy:
     name: Deploy to Cluster
@@ -141,12 +151,13 @@ jobs:
     needs: [api-build, spa-build]
     if: github.ref_name == 'main' || github.ref_name == 'preprod' || github.ref_name == 'develop'
     env:
-      tag: ${{ needs.calculate-tag.outputs.tag }}  # Ensure 'calculate-tag' step exists and outputs 'tag'
+      tag: ${{ github.sha }}
     steps:
       - name: Helm Repo Add and Update
         run: |
           helm repo add sb https://${{ secrets.GH_TOKEN }}@raw.githubusercontent.com/SE-Sustainability-Business/helm-repository/main
           helm repo update
+        shell: bash
 
       - name: Helm Deploy API
         run: |
@@ -155,6 +166,7 @@ jobs:
             --values .cicd/service/helm-vals/${{ env.environment }}.yaml \
             --set image.tag=${{ env.tag }} \
             --wait --timeout 10m0s
+        shell: bash
 
       - name: Helm Deploy UI
         run: |
@@ -163,3 +175,4 @@ jobs:
             --values .cicd/app/helm-vals/${{ env.environment }}.yaml \
             --set image.tag=${{ env.tag }} \
             --wait --timeout 10m0s
+        shell: bash
