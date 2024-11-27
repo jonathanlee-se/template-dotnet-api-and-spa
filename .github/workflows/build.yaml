@@ -125,41 +125,41 @@ jobs:
         run: npm run build -- -c=production
         working-directory: app
 
-      #- name: Docker Build UI
-      #  run: |
-      #    docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/$(appName)-ui:${{ env.tag }} -f .cicd/app/Dockerfile .
-      #    echo "UI Docker Image Built with Tag: ${{ env.tag }}"
+      - name: Docker Build UI
+        run: |
+          docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ env.image_tag }} -f .cicd/app/Dockerfile .
+          echo "UI Docker Image Built with Tag: ${{ env.image_tag }}"
 
-      #- name: Docker Push UI
-      #  run: |
-      #    echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
-      #    docker push ${{ secrets.ACR_SERVICE_CONNECTION }}/$(appName)-ui:${{ env.tag }}
+      - name: Docker Push UI
+        run: |
+          echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ secrets.ACR_LOGIN_SERVER }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+          docker push ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ env.image_tag }}
 
-  # deploy:
-  #   name: Deploy to Cluster
-  #   runs-on: ubuntu-latest
-  #   needs: [api-build, spa-build]
-  #   if: github.ref_name == 'main' || github.ref_name == 'preprod' || github.ref_name == 'develop'
-  #   env:
-  #     tag: ${{ needs.calculate-tag.outputs.tag }}
-  #   steps:
-  #     - name: Helm Repo Add and Update
-  #       run: |
-  #         helm repo add sb https://${{ secrets.GH_TOKEN }}@raw.githubusercontent.com/SE-Sustainability-Business/helm-repository/main
-  #         helm repo update
+  deploy:
+    name: Deploy to Cluster
+    runs-on: ubuntu-latest
+    needs: [api-build, spa-build]
+    if: github.ref_name == 'main' || github.ref_name == 'preprod' || github.ref_name == 'develop'
+    env:
+      tag: ${{ needs.calculate-tag.outputs.tag }}  # Ensure 'calculate-tag' step exists and outputs 'tag'
+    steps:
+      - name: Helm Repo Add and Update
+        run: |
+          helm repo add sb https://${{ secrets.GH_TOKEN }}@raw.githubusercontent.com/SE-Sustainability-Business/helm-repository/main
+          helm repo update
 
-  #     - name: Helm Deploy API
-  #       run: |
-  #         helm upgrade --install $(appName)-api sb/dotnet-api \
-  #           --namespace $(namespace) \
-  #           --values .cicd/service/helm-vals/$(environment).yaml \
-  #           --set image.tag=${{ env.tag }} \
-  #           --wait --timeout 10m0s
+      - name: Helm Deploy API
+        run: |
+          helm upgrade --install ${{ env.appName }}-api sb/dotnet-api \
+            --namespace ${{ env.namespace }} \
+            --values .cicd/service/helm-vals/${{ env.environment }}.yaml \
+            --set image.tag=${{ env.tag }} \
+            --wait --timeout 10m0s
 
-  #     - name: Helm Deploy UI
-  #       run: |
-  #         helm upgrade --install $(appName)-ui sb/spa \
-  #           --namespace $(namespace) \
-  #           --values .cicd/app/helm-vals/$(environment).yaml \
-  #           --set image.tag=${{ env.tag }} \
-  #           --wait --timeout 10m0s
+      - name: Helm Deploy UI
+        run: |
+          helm upgrade --install ${{ env.appName }}-ui sb/spa \
+            --namespace ${{ env.namespace }} \
+            --values .cicd/app/helm-vals/${{ env.environment }}.yaml \
+            --set image.tag=${{ env.tag }} \
+            --wait --timeout 10m0s
