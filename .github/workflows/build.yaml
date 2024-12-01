@@ -125,10 +125,10 @@ jobs:
         run: npm run build -- -c=production
         working-directory: app
 
-      #- name: Docker Build UI
-      #  run: |
-      #    docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ github.sha }} -f .cicd/app/Dockerfile .
-      #  shell: bash
+      - name: Docker Build UI
+        run: |
+          docker build -t ${{ secrets.ACR_SERVICE_CONNECTION }}/${{ env.appName }}-ui:${{ github.sha }} -f .cicd/app/Dockerfile .
+        shell: bash
 
       #- name: Docker Push UI
       #  run: |
