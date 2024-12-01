@@ -1,0 +1,280 @@
+parameters:
+  - name: deployBranches
+    displayName: These branches will trigger a deployment to Kubernetes.
+    type: object
+    default:
+      - main
+      - preprod
+      - develop
+
+trigger:
+  branches:
+    include:
+      - main
+      - preprod
+      - develop
+  paths:
+    exclude:
+      - doc/**
+      - README.md
+
+pr:
+  drafts: false
+  branches:
+    include:
+      - main
+      - preprod
+      - develop
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  ${{ if eq( variables['Build.SourceBranchName'], 'main' ) }}:
+    serviceConnector: aks-prod-eastus2
+    environment: prod
+    namespace: changeme-prod
+  ${{ elseif eq( variables['Build.SourceBranchName'], 'preprod' ) }}:
+    serviceConnector: aks-prod-eastus2
+    environment: preprod
+    namespace: changeme-preprod
+  ${{ else }}:
+    serviceConnector: aks-nonprod-eastus
+    environment: nonprod
+    namespace: changeme-nonprod
+
+  acrServiceConnection: acrsbsharedservices
+  appName: changeme
+  apiChartVersion: "0.3.5"
+  spaChartVersion: "0.1.3"
+
+stages:
+  - stage: Setup
+    displayName: Prerequisites
+    jobs:
+      - job: CalculateTag
+        displayName: Calculate Tag
+        steps:
+          - bash: |
+              git_tag=$( git tag --points-at HEAD )
+              if [ -z "$git_tag" ]; then
+                echo "No tag found for this commit."
+                echo "Using commit hash as tag: $( git rev-parse --short HEAD )"
+                echo "##vso[task.setvariable variable=tag;isOutput=true]$( git rev-parse --short HEAD )"
+              else
+                echo "Tag found for this commit: $git_tag"
+                echo "##vso[task.setvariable variable=tag;isOutput=true]$git_tag"
+              fi
+            name: gitTag
+
+  - stage: ApiBuild
+    displayName: API Build
+    dependsOn:
+      - Setup
+    variables:
+      tag: $[stageDependencies.Setup.CalculateTag.outputs['gitTag.tag']]
+    jobs:
+      - job: Build
+        displayName: Build and Publish Application
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              version: "8.x"
+
+          - task: DotNetCoreCLI@2
+            displayName: Restore
+            inputs:
+              command: restore
+              # TODO: Update this to match the path to your solution file
+              projects: "service/SE.Sustainability.Template.sln"
+              vstsFeed: "78546a61-f969-4f94-bbdc-0238cb74b0d1"
+
+          - task: DotNetCoreCLI@2
+            displayName: Dotnet Build
+            inputs:
+              command: build
+              # TODO: Update this to match the path to your solution file
+              projects: "service/SE.Sustainability.Template.sln"
+
+          - task: DotNetCoreCLI@2
+            displayName: Run Unit Tests
+            inputs:
+              command: test
+              projects: "**/*[Tt]ests.csproj"
+              arguments: '--configuration $(BuildConfiguration) --filter "FullyQualifiedName!~Integration&FullyQualifiedName!~Shared&Category!=integration" --collect:"XPlat Code Coverage"'
+              publishTestResults: true
+
+          - task: PublishTestResults@2
+            inputs:
+              testResultsFormat: NUnit
+              testResultsFiles: "**/TEST-*.xml"
+              failTaskOnFailedTests: true
+
+          # TODO: Uncomment once actual unit tests are running.
+          # - script: |
+          #     dotnet tool install -g dotnet-reportgenerator-globaltool
+          #     reportgenerator -reports:$(Agent.WorkFolder)/**/coverage.cobertura.xml -targetdir:$(Build.ArtifactStagingDirectory)/CoverageResults -reporttypes:'HtmlInline_AzurePipelines;Cobertura'
+          #   displayName: Create code coverage report
+
+          # - task: PublishCodeCoverageResults@1
+          #   displayName: Publish code coverage report
+          #   inputs:
+          #     codeCoverageTool: Cobertura
+          #     summaryFileLocation: "$(Build.ArtifactStagingDirectory)/CoverageResults/Cobertura.xml"
+          #     reportDirectory: "$(Build.ArtifactStagingDirectory)/CoverageResults"
+
+          - task: DotNetCoreCLI@2
+            displayName: Dotnet Publish API #revisit
+            inputs:
+              command: publish
+              publishWebProjects: false
+              # TODO: Update this to match the path to your project
+              projects: "**/SE.Sustainability.Template.API.csproj"
+              arguments: "--no-restore -o $(Build.ArtifactStagingDirectory)/.build"
+              zipAfterPublish: false
+              modifyOutputPath: false
+
+          - task: Docker@2
+            displayName: Docker Build
+            inputs:
+              command: build
+              containerRegistry: $(acrServiceConnection)
+              repository: $(appName)-api
+              buildContext: $(Build.ArtifactStagingDirectory)
+              dockerfile: "$(Build.SourcesDirectory)/.cicd/service/Dockerfile"
+              tags: $(tag)
+
+          - task: Docker@2
+            displayName: Docker Push
+            inputs:
+              command: push
+              containerRegistry: $(acrServiceConnection)
+              repository: $(appName)-api
+              tags: $(tag)
+
+  - stage: SpaBuild
+    displayName: UI Build
+    jobs:
+      - job: Build
+        steps:
+          - task: UseNode@1
+            displayName: Use Node 20.x
+            inputs:
+              version: 20.x
+
+          - task: Npm@1
+            displayName: Install dependencies
+            inputs:
+              command: ci
+              customEndpoint: SE ESS NPM
+              workingDir: app
+
+          - script: npm run prettier
+            displayName: Prettier
+            workingDirectory: app
+
+          - script: npm run lint
+            displayName: Lint
+            workingDirectory: app
+
+          - script: npm run test:ci
+            displayName: Tests
+            workingDirectory: app
+
+          - task: PublishTestResults@2
+            displayName: Publish test results
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: app/coverage/TESTS-*.xml
+
+          - task: PublishCodeCoverageResults@2
+            displayName: Publish code coverage
+            inputs:
+              summaryFileLocation: app/coverage/cobertura-coverage.xml
+
+          - script: npm run build -- -c=production
+            displayName: Build
+            workingDirectory: app
+
+          - task: Docker@2
+            displayName: Docker build
+            inputs:
+              command: build
+              containerRegistry: $(acrServiceConnection)
+              repository: $(appName)-ui
+              buildContext: $(Build.SourcesDirectory)
+              dockerFile: $(Build.SourcesDirectory)/.cicd/app/Dockerfile
+              tags: $(tag)
+
+          - task: Docker@2
+            displayName: "Docker Push"
+            inputs:
+              command: push
+              containerRegistry: $(acrServiceConnection)
+              repository: $(appName)-ui
+              tags: $(tag)
+
+  - stage: Deploy
+    displayName: Deploy to Cluster
+    dependsOn:
+      - Setup
+      - ApiBuild
+      - SpaBuild
+    variables:
+      - group: Githubsecret
+      - name: tag
+        value: $[stageDependencies.Setup.CalculateTag.outputs['gitTag.tag']]
+    jobs:
+      - job: Deploy
+        displayName: Helm Service Deployment
+        condition: ${{ containsValue(parameters.deployBranches, variables['Build.SourceBranchName']) }}
+        steps:
+          - task: HelmDeploy@0
+            displayName: Add Helm Repo
+            name: helm_add
+            inputs:
+              kubernetesServiceEndpoint: $(serviceConnector)
+              command: repo
+              arguments: add sb https://$(GH-TOKEN)@raw.githubusercontent.com/SE-Sustainability-Business/helm-repository/main
+
+          - task: HelmDeploy@0
+            displayName: Update Helm Repo
+            name: helm_update
+            inputs:
+              kubernetesServiceEndpoint: $(serviceConnector)
+              command: repo
+              arguments: update sb
+
+          - task: HelmDeploy@0
+            displayName: Api Deploy
+            name: api_helm_deploy
+            inputs:
+              connectionType: Kubernetes Service Connection
+              kubernetesServiceEndpoint: $(serviceConnector)
+              command: upgrade
+              arguments: --timeout 10m0s
+              chartName: sb/dotnet-api
+              chartVersion: $(apiChartVersion)
+              namespace: $(namespace)
+              valueFile: $(System.DefaultWorkingDirectory)/.cicd/service/helm-vals/$(environment).yaml
+              overrideValues: image.tag=$(tag)
+              releaseName: $(appName)-api
+              install: true
+              waitForExecution: true
+
+          - task: HelmDeploy@0
+            displayName: UI Deploy
+            name: spa_helm_deploy
+            inputs:
+              connectionType: Kubernetes Service Connection
+              kubernetesServiceEndpoint: $(serviceConnector)
+              command: upgrade
+              arguments: --timeout 10m0s
+              chartName: sb/spa
+              chartVersion: $(spaChartVersion)
+              namespace: $(namespace)
+              valueFile: $(System.DefaultWorkingDirectory)/.cicd/app/helm-vals/$(environment).yaml
+              overrideValues: image.tag=$(tag)
+              releaseName: $(appName)-ui
+              install: true
+              waitForExecution: true
