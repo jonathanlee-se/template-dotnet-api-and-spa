@@ -1,0 +1,49 @@
+name: Create Dockerfile
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  create-dockerfile:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout the repository to the runner
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # Create a Dockerfile in the src directory
+    - name: Create Dockerfile
+      run: |
+        mkdir -p src
+        cat <<EOF > src/Dockerfile
+        # Use an official Node.js runtime as a parent image
+        FROM node:18
+
+        # Set the working directory in the container
+        WORKDIR /usr/src/app
+
+        # Copy the application files into the container
+        COPY . .
+
+        # Install dependencies
+        RUN npm install
+
+        # Expose port 3000
+        EXPOSE 3000
+
+        # Define the command to run the application
+        CMD ["npm", "start"]
+        EOF
+
+    # Commit and push the Dockerfile
+    - name: Commit and push changes
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add src/Dockerfile
+        git commit -m "Create Dockerfile in src directory"
+        git push
